@@ -30,6 +30,20 @@ def list_entries(
     return PageResult(items=items, total=total, page=page, size=size)
 
 
+@router.get("/todo", response_model=PageResult[dict])
+def todo_entries() -> PageResult[dict]:
+    """检修待办列表：未完工的检修计划（含储能结论联动开立的待办），条数与清单一致。"""
+    items, total = service.todo_list()
+    return PageResult(items=items, total=total, page=1, size=total or 1)
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出检修计划清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "maintenance", "total": total, "items": items}
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条检修计划明细；不存在时给出可读的错误说明。"""
@@ -56,10 +70,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出检修计划清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "maintenance", "total": total, "items": items}

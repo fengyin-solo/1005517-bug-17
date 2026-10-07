@@ -1,4 +1,4 @@
-"""储能电池组接口：维护储能电池组，覆盖启动充电、启动放电、切换到待机等动作。"""
+"""储能电池组接口：维护储能电池组，覆盖检测结论上报、巡检清单与状态流转。"""
 from __future__ import annotations
 
 from typing import Any
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/energy_storage", tags=["储能电池组"])
 
 service = EnergyStorageService()
 
-LIST_FIELDS = ["电池组编号", "电池类型", "额定容量", "SOC上限", "充放电循环", "电池温度", "内阻变化率", "运行状态"]
+LIST_FIELDS = ["电池组编号", "电池类型", "额定容量", "SOC上限", "当前SOC", "内阻变化率", "结论", "运行状态"]
 STATUSES = ["充电中", "放电中", "待机", "故障停机"]
 
 
@@ -28,6 +28,27 @@ def list_entries(
         raise HTTPException(status_code=400, detail="每页最多 200 条，请缩小分页范围")
     items, total = service.list_entries(keyword=keyword, status=status, page=page, size=size)
     return PageResult(items=items, total=total, page=page, size=size)
+
+
+@router.get("/inspection", response_model=PageResult[dict])
+def inspection_entries() -> PageResult[dict]:
+    """巡检清单：全部电池组（含故障停机等已停用组）逐组带结论，条数与清单一致。"""
+    items, total = service.inspection_list()
+    return PageResult(items=items, total=total, page=1, size=total or 1)
+
+
+@router.get("/export")
+def export_entries() -> dict[str, Any]:
+    """导出储能电池组清单：返回当前过滤条件下的全量数据。"""
+    items, total = service.list_entries(page=1, size=10000)
+    return {"module": "energy_storage", "total": total, "items": items}
+
+
+@router.post("/assessments", response_model=ActionResult)
+def submit_assessment(payload: EntryPayload) -> ActionResult:
+    """上报一组电池的检测数据：缺数据退回并写清缺什么，重复提交只生效一次，结论落库。"""
+    entry, message, ok = service.submit_assessment(payload.values)
+    return ActionResult(ok=ok, message=message, entry=entry)
 
 
 @router.get("/{entry_id}", response_model=dict)
@@ -56,10 +77,3 @@ def run_action(entry_id: int, payload: EntryPayload) -> ActionResult:
     if entry is None:
         return ActionResult(ok=False, message=message)
     return ActionResult(ok=True, message=message, entry=entry)
-
-
-@router.get("/export")
-def export_entries() -> dict[str, Any]:
-    """导出储能电池组清单：返回当前过滤条件下的全量数据。"""
-    items, total = service.list_entries(page=1, size=10000)
-    return {"module": "energy_storage", "total": total, "items": items}
