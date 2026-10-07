@@ -59,11 +59,39 @@
       <span>共 {{ total }} 条巡视检查记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <!-- 储能电池组巡检清单：与判定同一口径，已停用的组也在册，条数与序号严格对齐 -->
+    <div class="checklist-block">
+      <div class="checklist-head">
+        <h3>储能电池组巡检清单</h3>
+        <span class="checklist-meta">共 {{ checklistTotal }} 组（含已停用 {{ disabledCount }} 组）</span>
+        <button class="btn" type="button" @click="loadChecklist">刷新清单</button>
+      </div>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th v-for="column in checklistColumns" :key="column">{{ column }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in checklist" :key="String(item.id)">
+            <td v-for="column in checklistColumns" :key="column">
+              <span v-if="column === '判定结论'" class="verdict" :class="verdictClass(item[column])">{{ item[column] ?? '—' }}</span>
+              <template v-else>{{ item[column] ?? '—' }}</template>
+            </td>
+          </tr>
+          <tr v-if="!checklist.length">
+            <td :colspan="checklistColumns.length" class="empty-state">暂无储能电池组巡检项</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="checklistError" class="error-text">{{ checklistError }}</p>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
@@ -72,14 +100,31 @@ type Row = Record<string, string | number | null>
 const ENDPOINT = '/api/patrol'
 const columns = ["记录编号", "巡视区域", "巡视日期", "巡视人员", "发现缺陷数", "红外测温结果", "接线端子温度", "巡视状态"]
 const actions = ["开始巡视", "提交记录", "归档记录"]
-const statuses = ["待巡视", "巡视中", "已记录", "已归档"]
-const stats = [{"label": "今日巡视数", "value": 0}, {"label": "发现缺陷数", "value": 0}, {"label": "待巡视区域", "value": 0}]
+const stats = [{ label: "今日巡视数", value: 0 }, { label: "发现缺陷数", value: 0 }, { label: "待巡视区域", value: 0 }]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+// 巡检清单走储能侧的统一口径接口，序号由后端连续给出，已停用的组同样在册
+const CHECKLIST_ENDPOINT = '/api/energy_storage/patrol_checklist'
+const checklistColumns = ["序号", "电池组编号", "电池类型", "SOC上限", "当前SOC", "内阻变化率", "判定结论", "已停用", "status"]
+const checklist = ref<Row[]>([])
+const checklistTotal = ref(0)
+const checklistError = ref('')
+
+const disabledCount = computed(
+  () => checklist.value.filter((item) => item['已停用'] === '是' || item['status'] === '已停用').length,
+)
+
+function verdictClass(verdict: unknown): string {
+  if (verdict === '过充风险') return 'verdict-danger'
+  if (verdict === '内阻异常') return 'verdict-warn'
+  if (verdict === '正常') return 'verdict-ok'
+  return ''
+}
 
 function resetFilters() {
   filters.value = {}
@@ -99,10 +144,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('巡视检查动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload || payload.ok === false) {
+      throw new Error(payload?.message ? String(payload.message) : '巡视检查动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {
@@ -126,5 +172,39 @@ async function reload() {
   }
 }
 
-onMounted(reload)
+async function loadChecklist() {
+  checklistError.value = ''
+  try {
+    const response = await request(CHECKLIST_ENDPOINT)
+    if (!response.ok) {
+      throw new Error('储能电池组巡检清单读取失败')
+    }
+    const payload = await response.json()
+    checklist.value = payload.items ?? []
+    checklistTotal.value = payload.total ?? checklist.value.length
+  } catch (error) {
+    checklistError.value = error instanceof Error ? error.message : '储能电池组巡检清单读取失败'
+  }
+}
+
+onMounted(() => {
+  void reload()
+  void loadChecklist()
+})
 </script>
+
+<style scoped>
+.checklist-block { margin-top: 24px; }
+.checklist-head { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
+.checklist-head h3 { margin: 0; font-size: 15px; }
+.checklist-meta { color: var(--muted); font-size: 12px; }
+.verdict {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+}
+.verdict-ok { background: #e7f6ec; color: #16733c; }
+.verdict-warn { background: #fdf3e0; color: #b5570a; }
+.verdict-danger { background: #fde8e8; color: #b42318; }
+</style>

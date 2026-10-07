@@ -63,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { request } from '@/api/client'
 
@@ -72,14 +72,20 @@ type Row = Record<string, string | number | null>
 const ENDPOINT = '/api/maintenance'
 const columns = ["计划编号", "检修设备", "检修类别", "计划开始", "计划结束", "责任人", "安全措施", "计划状态"]
 const actions = ["提交审批", "开始执行", "确认完工"]
-const statuses = ["待审批", "已批复", "执行中", "已完工"]
-const stats = [{"label": "待审批计划", "value": 0}, {"label": "执行中计划", "value": 0}, {"label": "本月完工数", "value": 0}]
+const statuses = ["待办", "待审批", "已批复", "执行中", "已完工"]
 
 const rows = ref<Row[]>([])
 const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+
+const stats = computed(() => [
+  { label: "待办（巡检结论变化）", value: rows.value.filter((row) => row['status'] === '待办' || row['计划状态'] === '待办').length },
+  { label: "待审批计划", value: rows.value.filter((row) => row['status'] === '待审批').length },
+  { label: "执行中计划", value: rows.value.filter((row) => row['status'] === '执行中').length },
+  { label: "计划总数", value: total.value },
+])
 
 function resetFilters() {
   filters.value = {}
@@ -99,10 +105,11 @@ async function runAction(action: string, row: Row) {
   try {
     const response = await request(`${ENDPOINT}/${row.id}/actions`, {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ values: { action } }),
     })
-    if (!response.ok) {
-      throw new Error('检修计划动作未生效，请稍后重试')
+    const payload = await response.json().catch(() => null)
+    if (!response.ok || !payload || payload.ok === false) {
+      throw new Error(payload?.message ? String(payload.message) : '检修计划动作未生效，请稍后重试')
     }
     await reload()
   } catch (error) {

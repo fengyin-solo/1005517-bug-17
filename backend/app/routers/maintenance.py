@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/maintenance", tags=["检修计划"])
 service = MaintenanceService()
 
 LIST_FIELDS = ["计划编号", "检修设备", "检修类别", "计划开始", "计划结束", "责任人", "安全措施", "计划状态"]
-STATUSES = ["待审批", "已批复", "执行中", "已完工"]
+STATUSES = ["待办", "待审批", "已批复", "执行中", "已完工"]
 
 
 @router.get("", response_model=PageResult[dict])

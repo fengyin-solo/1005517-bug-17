@@ -1,13 +1,15 @@
-"""检修计划业务规则：状态流转、字段校验与筛选口径都收在这里。"""
+"""检修计划业务规则：状态流转、字段校验、筛选口径与待办接入都收在这里。"""
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from app.store import store
 
 MODULE = "maintenance"
 REQUIRED_FIELDS = ["计划编号", "检修设备", "检修类别"]
-STATUS_ORDER = ["待审批", "已批复", "执行中", "已完工"]
+# 巡检结论变化生成的待办排在最前一档；老数据仍从「待审批」流转，兼容不动
+STATUS_ORDER = ["待办", "待审批", "已批复", "执行中", "已完工"]
 ACTION_RULES = {"提交审批": "已批复", "开始执行": "执行中", "确认完工": "已完工"}
 NEGATIVE_ACTIONS = []
 
@@ -59,3 +61,35 @@ class MaintenanceService:
         entry["pending"] = target != STATUS_ORDER[-1]
         entry["abnormal"] = action in NEGATIVE_ACTIONS
         return entry, f"检修计划已{action}"
+
+    def add_todo(
+        self,
+        *,
+        device_code: str,
+        device_name: str,
+        category: str,
+        reason: str,
+        source: str = "巡检判定",
+        urgent: bool = False,
+    ) -> dict[str, Any]:
+        """结论变化时往检修计划的待办列表追加一条，状态固定为「待办」。"""
+        rows = store.rows(MODULE)
+        next_id = max((int(row.get("id", 0)) for row in rows), default=0) + 1
+        today = datetime.now().strftime("%Y-%m-%d")
+        todo = {
+            "id": next_id,
+            "status": "待办",
+            "pending": True,
+            "abnormal": urgent,
+            "计划编号": f"MAIN-TODO-{next_id:04d}",
+            "检修设备": f"{device_name} {device_code}".strip(),
+            "检修类别": category,
+            "计划开始": today,
+            "计划结束": "",
+            "责任人": "待分派",
+            "安全措施": reason,
+            "计划状态": "待办",
+            "待办来源": source,
+        }
+        rows.append(todo)
+        return todo
